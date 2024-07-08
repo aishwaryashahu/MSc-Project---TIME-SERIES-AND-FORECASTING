@@ -86,10 +86,6 @@ The analyses demonstrate the robustness of statistical modeling in predicting fu
 6. Zeileis, A., & Grothendieck, G. (2005). zoo: S3 Infrastructure for Regular and Irregular Time Series. Journal of Statistical Software.
 7. UK Meteorological Office Hadley Climate Centre. (2023). UK regional climates data set.
 
-## Appendices
-- **Appendix A**: R Code for Temperature Analysis
-- **Appendix B**: R Code for House Price Forecasting
-
 ---
 
 Feel free to contribute to this project by creating issues or submitting pull requests.
