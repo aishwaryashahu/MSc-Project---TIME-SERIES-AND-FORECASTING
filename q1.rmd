@@ -1,0 +1,234 @@
+```{r}
+#Step 1: Exploratory Data Analysis (EDA)
+
+# Load necessary libraries
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(Metrics)
+
+# Load and check the data structure
+temperature_data <- read.csv('cet_temp.csv')
+str(temperature_data)
+
+# Convert data to a time series object
+temperature_ts <- ts(temperature_data$avg_annual_temp_C, start = 1900, frequency = 1)
+str(temperature_ts)
+
+
+```
+```{r}
+# Visualize the time series data with ggplot2
+ts_df <- data.frame(Time = time(temperature_ts), Temperature = as.numeric(temperature_ts))
+p <- ggplot(ts_df, aes(x = Time, y = Temperature)) +
+  geom_line(color = "skyblue", size = 1) +
+  labs(title = "Annual Average Temperature in Midlands Region, UK",
+       y = "Temperature (°C)",
+       x = "Year") +
+  theme_minimal(base_size = 14)
+print(p)
+
+```
+```{r}
+#Step 2: Stationarity Test and Transformation
+# Augmented Dickey-Fuller test
+adf_test_result <- adf.test(temperature_ts)
+
+# Print the ADF test results
+print(adf_test_result)
+
+# Check if the series needs differencing based on the ADF test p-value
+if(adf_test_result$p.value > 0.05) {
+  print("Series is not stationary: Differencing is required.")
+  temperature_ts_diff <- diff(temperature_ts)
+
+  # Plot the differenced series to visualize changes
+  ggplot(data.frame(Year = 1901:2021, Temperature = temperature_ts_diff), aes(x = Year, y = Temperature)) +
+    geom_line(color = "blue") + geom_point(color = "red") +
+    labs(title = "Differenced Annual Mean Temperature",
+         x = "Year", y = "Difference in Temperature") +
+    theme_minimal()
+} else {
+  print("Series is stationary: No differencing required.")
+}
+```
+```{r}
+#Step 3: Model Selection
+
+# extract ACF and PACF data
+acf_result <- acf(temperature_ts, plot = FALSE)
+pacf_result <- pacf(temperature_ts, plot = FALSE)
+
+# Extract the significant level for the confidence intervals
+ci <- qnorm((1 + 0.95) / 2) / sqrt(length(temperature_ts))
+
+acf_df <- data.frame(Lag = seq(along = acf_result$acf) - 1, ACF = acf_result$acf)
+pacf_df <- data.frame(Lag = seq(along = pacf_result$acf) - 1, PACF = pacf_result$acf)
+
+# Plot ACF using ggplot2
+acf_p <- ggplot(acf_df, aes(x = Lag, y = ACF)) +
+  geom_bar(stat = "identity", fill = "steelblue", width = 0.6) +
+  geom_hline(yintercept = c(-ci, ci), color = "red", linetype = "dashed") +
+  labs(title = "Autocorrelation Function",
+       subtitle = "95% Confidence Interval",
+       y = "Autocorrelation",
+       x = "Lag") +
+  theme_minimal(base_size = 14)
+print(acf_p)
+
+# Plot PACF using ggplot2
+pacf_p <- ggplot(pacf_df, aes(x = Lag, y = PACF)) +
+  geom_bar(stat = "identity", fill = "firebrick", width = 0.6) +
+  geom_hline(yintercept = c(-ci, ci), color = "red", linetype = "dashed") +
+  labs(title = "Partial Autocorrelation Function",
+       subtitle = "95% Confidence Interval",
+       y = "Partial Autocorrelation",
+       x = "Lag") +
+  theme_minimal(base_size = 14)
+print(pacf_p)
+```
+
+
+```{r}
+# Statistical Tests for Stationarity
+pp_test_result <- PP.test(temperature_ts)
+adf_test_result <- adf.test(temperature_ts)
+
+print(pp_test_result)
+print(adf_test_result)
+```
+```{r}
+# AR Model Fitting
+ar_fit <- ar(temperature_ts)  # AR(5) model
+summary(ar_fit)
+
+```
+
+```{r}
+# QQ plot for residuals with ggplot2
+resid_df <- data.frame(Residuals = ar_fit$resid)
+qq_p <- ggplot(resid_df, aes(sample = Residuals)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(title = "Q-Q Plot of Residuals") +
+  theme_minimal(base_size = 14)
+print(qq_p)
+
+# Evaluate and visualize the residuals
+residuals_df <- data.frame(AR_Residuals = residuals(ar_fit), ARIMA_Residuals = residuals(arima_model))
+ggplot(residuals_df, aes(x = AR_Residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "blue", alpha = 0.7) +
+  geom_density(color = "red") +
+  labs(title = "Residual Distribution for AR Model")
+
+```
+
+```{r}
+
+# Scatter plot of actual vs. fitted values with ggplot2
+fit_df <- data.frame(Actual = as.numeric(temperature_ts), Fitted = fitted(ar_fit))
+fit_p <- ggplot(fit_df, aes(x = Actual, y = Fitted)) +
+  geom_point(alpha = 0.6, aes(color = "Data Points")) +  
+  geom_smooth(method = "lm", color = "darkred", se = FALSE, aes(linetype = "Fit Line")) +  
+  labs(title = "Actual vs Fitted Values from AR Model",
+       x = "Actual Temperature (°C)",
+       y = "Fitted Temperature (°C)",
+       color = "Legend",  # Legend title for color
+       linetype = "Legend") +  # Legend title for linetype
+  theme_minimal(base_size = 14) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "blue", aes(linetype = "1:1 Line")) +  # Specify linetype in aes for abline
+  scale_color_manual(values = c("Data Points" = "black")) +  # Define colors for points
+  scale_linetype_manual(values = c("Fit Line" = "solid", "1:1 Line" = "dashed"))  # Define linetypes
+print(fit_p)
+
+#"Black dots represent individual observations. The solid dark red line is the linear regression fit, indicating the trend between actual and fitted values. The blue dashed line represents perfect prediction (Actual = Fitted)."
+
+```
+```{r}
+# Define 'actual_fitted_df' after the AR model fitting
+actual_fitted_df <- data.frame(
+  Actual = as.numeric(temperature_ts), 
+  Fitted_AR = fitted(ar_fit)
+)
+# Model Evaluation with MAPE and RMSE
+mape_value <- mape(actual_fitted_df$Actual[6:122], na.exclude(actual_fitted_df$Fitted))
+rmse_value <- rmse(actual_fitted_df$Actual[6:122], na.exclude(actual_fitted_df$Fitted))
+
+print(paste("MAPE:", mape_value))
+print(paste("RMSE:", rmse_value))
+
+# Forecast the next 10 years
+forecast_future <- forecast(ar_fit, h = 10)
+plot(forecast_future)
+```
+
+```{r}
+# Automated ARIMA modeling
+arima_model <- Arima(temperature_ts, order = c(0, 1, 1))  # Best model based on AIC
+summary(arima_model)
+
+```
+
+```{r}
+#Step 4: Model Diagnostics
+# Check residuals
+checkresiduals(arima_model)
+
+# Diagnostic Plots
+# Influence and Leverage plots typically used in regression settings, applying equivalent diagnostics for ARIMA:
+tsdiag(arima_model)
+
+# Additional diagnostic plots
+ggplot(data.frame(Residuals = residuals(arima_model)), aes(x = Residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "blue", color = "black") +
+  geom_density(color = "red") +
+  labs(title = "Residuals Distribution ") +
+  theme_minimal()
+```
+
+```{r}
+# Extract fitted values from the ARIMA model
+actual_values <- as.numeric(temperature_ts)  # Make sure to use your actual time series object
+
+# Get the fitted values from the ARIMA model
+fitted_values <- fitted(arima_model)
+
+# Create a data frame for plotting
+data_for_plotting <- data.frame(Actual = actual_values, Fitted = fitted_values)
+
+# Plot Actual vs. Fitted Values using ggplot2
+
+ggplot(data_for_plotting, aes(x = Actual, y = Fitted)) +
+  geom_point(color = "blue", alpha = 0.6) +  # Color and transparency for points
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +  # 45-degree line indicating perfect fit
+  labs(title = "Actual vs Fitted Values from ARIMA Model",
+       x = "Actual Temperature (°C)",
+       y = "Fitted Temperature (°C)") +
+  theme_minimal()  # Minimal theme for cleaner look
+  
+
+```
+```{r}
+#Step 5: Forecasting and Evaluation
+# Forecast the next 10 years
+forecast_future <- forecast(arima_model, h = 10)
+plot(forecast_future)
+
+
+```
+```{r}
+
+# Fitting the models
+fitted_arima <- fitted(arima_model)
+# Actual observations to compare against
+actuals <- temperature_ts
+
+# Calculate MAE and MSE for ARIMA Model
+mae_arima <- mae(actuals, fitted_arima)
+mse_arima <- mse(actuals, fitted_arima)
+
+# Print the results
+cat("Performance Metrics for ARIMA Model:\n")
+cat(sprintf("MAE: %f\n", mae_arima))
+cat(sprintf("MSE: %f\n", mse_arima))
+```

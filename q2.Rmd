@@ -1,0 +1,220 @@
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(forecast)
+library(tseries)  
+library(gridExtra)  
+
+# Read and inspect the dataset
+df <- read.csv('em_house_prices.csv')
+df_ts <- ts(df$average_price_gbp, start = c(2010, 1), frequency = 12)
+
+str(df_ts)
+```
+```{r}
+# Initial plot for visual inspection using ggplot2
+p <- ggplot(data.frame(Time = time(df_ts), House_Price = df_ts), aes(x = Time, y = House_Price)) +
+  geom_line(color = "darkgreen") +
+  labs(title = "Monthly Average House Prices in East Midlands", x = "Year", y = "Average Price (£)") +
+  geom_smooth(method = "loess", color = "pink", se = FALSE) +
+  theme_minimal()
+
+print(p)
+
+
+```
+```{r}
+# Decompose the time series and plot components
+trend_df <- data.frame(Time = time(df_ts), Trend = decomposed_ts$time.series[,"trend"])
+seasonal_df <- data.frame(Time = time(df_ts), Seasonal = decomposed_ts$time.series[,"seasonal"])
+random_df <- data.frame(Time = time(df_ts), Random = decomposed_ts$time.series[,"remainder"])
+
+# Plotting each component with ggplot
+trend_p <- ggplot(trend_df, aes(x = Time, y = Trend)) +
+  geom_line(color = "deepskyblue3") +
+  labs(title = "Trend Component", x = "Year", y = "Trend") +
+  theme_minimal()
+
+seasonal_p <- ggplot(seasonal_df, aes(x = Time, y = Seasonal)) +
+  geom_line(color = "darkgreen") +
+  labs(title = "Seasonal Component", x = "Year", y = "Seasonality") +
+  theme_minimal()
+
+random_p <- ggplot(random_df, aes(x = Time, y = Random)) +
+  geom_line(color = "darkorange") +
+  labs(title = "Random Component", x = "Year", y = "Random Noise") +
+  theme_minimal()
+
+# Display all plots together
+grid.arrange(trend_p, seasonal_p, random_p, ncol = 1)
+
+
+```
+```{r}
+# Calculate ACF and PACF
+acf_res <- acf(df_ts, plot = FALSE)
+pacf_res <- pacf(df_ts, plot = FALSE)
+
+# generate lag indices for ACF and PACF
+acf_df <- data.frame(Lag = seq(along = acf_res$acf) - 1, ACF = acf_res$acf)
+pacf_df <- data.frame(Lag = seq(along = pacf_res$acf) - 1, PACF = pacf_res$acf)
+
+# Confidence interval for 95%
+ci <- qnorm((1 + 0.95) / 2) / sqrt(length(df_ts))
+
+# Plot ACF using ggplot2
+acf_p <- ggplot(acf_df, aes(x = Lag, y = ACF)) +
+  geom_bar(stat = "identity", fill = "steelblue", width = 0.6) +
+  geom_hline(yintercept = c(-ci, ci), color = "red", linetype = "dashed") +
+  labs(title = "Autocorrelation Function",
+       subtitle = "95% Confidence Interval",
+       y = "Autocorrelation",
+       x = "Lag") +
+  theme_minimal(base_size = 14)
+print(acf_p)
+
+# Plot PACF using ggplot2
+pacf_p <- ggplot(pacf_df, aes(x = Lag, y = PACF)) +
+  geom_bar(stat = "identity", fill = "firebrick", width = 0.6) +
+  geom_hline(yintercept = c(-ci, ci), color = "red", linetype = "dashed") +
+  labs(title = "Partial Autocorrelation Function",
+       subtitle = "95% Confidence Interval",
+       y = "Partial Autocorrelation",
+       x = "Lag") +
+  theme_minimal(base_size = 14)
+print(pacf_p)
+
+```
+```{r}
+# Statistical checks for stationarity
+adf_result <- adf.test(df_ts, alternative = "stationary")
+kpss_result <- kpss.test(df_ts)
+print(adf_result)
+print(kpss_result)
+
+# Check if differencing is needed based on ADF test
+if (adf_result$p.value > 0.05) {
+  cat("Series is not stationary, differencing is applied.\n")
+  df_ts_diff <- diff(df_ts)
+  
+  # Plot the differenced series
+  p_diff <- ggplot(data.frame(Time = time(df_ts_diff), House_Price = df_ts_diff), aes(x = Time, y = House_Price)) +
+    geom_line() +
+    labs(title = "Differenced House Price Series", x = "Year", y = "Differenced Price (£)") +
+    theme_minimal()
+  print(p_diff)
+  # Re-plot ACF and PACF after differencing
+  p4 <- ggAcf(df_ts_diff, lag.max = 48) + 
+    labs(title = "ACF of Differenced Series") +
+    theme_minimal()
+  
+  p5 <- ggPacf(df_ts_diff, lag.max = 48) +
+    labs(title = "PACF of Differenced Series") +
+    theme_minimal()
+  
+  grid.arrange(p4, p5, ncol = 2)
+} else {
+  cat("Series is stationary, no differencing needed.\n")
+}
+```
+```{r}
+# Fit an ARIMA(1,1,1) model to the possibly differenced series
+fit_arima <- Arima(df_ts_diff, order = c(1,1,1))
+summary(fit_arima)
+
+# Model diagnostics plots
+tsdiag(fit_arima)
+
+# Diagnostic plots for residuals
+hist(fit_arima$residuals, freq = FALSE, main = 'Distribution of Residuals ARIMA')
+lines(density(sarima_fit$residuals, na.rm = TRUE), col = 'blue')
+
+# Checking residuals for normality and independence
+shapiro_test <- shapiro.test(residuals(fit_arima))
+ljung_box_test <- Box.test(residuals(fit_arima), type = "Ljung-Box")
+print(shapiro_test)
+print(ljung_box_test)
+
+
+```
+```{r}
+# Fit the SARIMA(1,0,2)(2,0,0)[12] model
+sarima_fit <- Arima(df_ts_diff, order=c(1,0,2), seasonal=list(order=c(2,0,0), period=12))
+# View the summary of the model
+summary(sarima_fit)
+
+# Model diagnostics plots
+tsdiag(sarima_fit)
+
+# Diagnostic plots for residuals
+hist(sarima_fit$residuals, freq = FALSE, main = 'Distribution of Residuals SARIMA')
+lines(density(sarima_fit$residuals, na.rm = TRUE), col = 'blue')
+
+
+# Checking residuals for normality and independence
+shapiro_test <- shapiro.test(residuals(sarima_fit))
+ljung_box_test <- Box.test(residuals(sarima_fit), type = "Ljung-Box")
+print(shapiro_test)
+print(ljung_box_test)
+
+```
+
+```{r}
+# Compare the performance of ARIMA(1,1,1) with the SARIMA model based on AIC and BIC
+cat("ARIMA AIC:", AIC(fit_arima), "BIC:", BIC(fit_arima), "\n")
+cat("SARIMA AIC:", AIC(sarima_fit), "BIC:", BIC(sarima_fit), "\n")
+
+```
+```{r}
+#As SARIMA has lower AIC and BIC we will go forward for final model as SARIMA
+# Forecasting the next 6 months and plot results
+forecasted_values <- forecast(sarima_fit, h = 6)
+autoplot(forecasted_values) +
+  labs(title = "6-Month Forecast of House Prices Differenced Series ", x = "Year", y = "Price (£)") +
+  theme_minimal()
+# Generate forecasts from the differenced model
+forecasted_diff_values <- forecast(sarima_fit, h = 6)
+```
+```{r}
+# Generate forecasts from the differenced model
+forecasted_diff_values <- forecast(sarima_fit, h = 6)
+
+# Extract the last actual value of the non-differenced time series
+last_value <- tail(df_ts, 1)
+
+# Reverse the differencing process to convert forecasts back to the original scale
+cumulative_forecast <- cumsum(c(last_value, forecasted_diff_values$mean))
+
+# Create a time sequence for the forecasted values
+forecast_times <- seq(time(df_ts)[length(df_ts)] + 1/frequency(df_ts), 
+                      by = 1/frequency(df_ts), length.out = length(cumulative_forecast) - 1)
+
+# Prepare the data frame for the forecast plot
+forecast_df <- data.frame(
+  Time = forecast_times,
+  Forecast = cumulative_forecast[-1],  # Exclude the first value (last actual value)
+  Lower_80 = cumulative_forecast[-1] + forecasted_diff_values$lower[, "80%"],
+  Upper_80 = cumulative_forecast[-1] + forecasted_diff_values$upper[, "80%"],
+  Lower_95 = cumulative_forecast[-1] + forecasted_diff_values$lower[, "95%"],
+  Upper_95 = cumulative_forecast[-1] + forecasted_diff_values$upper[, "95%"]
+)
+
+# Combine historical and forecast data frames for ggplot
+historical_df <- data.frame(Time = time(df_ts), House_Price = as.numeric(df_ts))
+
+# Plot with ggplot2
+p <- ggplot() +
+  geom_line(data = historical_df, aes(x = Time, y = House_Price), color = "black") +
+  geom_line(data = forecast_df, aes(x = Time, y = Forecast), color = "blue", linetype = "dashed") +
+  geom_ribbon(data = forecast_df, aes(x = Time, ymin = Lower_95, ymax = Upper_95), fill = "blue", alpha = 0.1) +
+  geom_ribbon(data = forecast_df, aes(x = Time, ymin = Lower_80, ymax = Upper_80), fill = "blue", alpha = 0.3) +
+  labs(title = '6 Mounth Forecasted House Prices on Non-differenced data', x = 'Time', y = 'House Price (£)') +
+  theme_minimal()
+
+# Print the plot
+print(p)
+
+```
+
+
+
